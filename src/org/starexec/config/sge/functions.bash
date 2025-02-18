@@ -109,15 +109,6 @@ function adjustForK8s {
 
 
 
-
-
-
-
-
-
-
-
-
 ######################################################################
 
 # setup the memory limit for this stage
@@ -215,23 +206,37 @@ function isInteger {
 # checks to see whether the pair with the given PID is actually running
 function isPairRunning {
 	log "isPairRunning called on pair pid = $1"
-
-	if ! (isInteger $1); then
+ 
+	if ! (isInteger $1); then #~ not important now
 		log "$1 is not a valid integer, so no pair is running"
 		return 1
 	fi
+
 	output=$(cat "$LOCK_DIR/$1")
-	if [ -z "${output// }" ]; then
+
+	#@ DANIEL ADDED FOR DEBUGGING
+	cat "$LOCK_DIR/$1"
+	log "${output// }"
+	#@                           
+
+	if [ -z "${output// }" ]; then #~ not important now
 		log "no process output was saved in the lock file, so assuming pair was deleted"
 		# the job is not still running
 		return 1
 	fi
 
-	log "$output"
+	log "output = $output"
+
 	currentOutput=$(ps -p $1 -o pid,cmd | awk 'NR>1')
-	log "$currentOutput"
+
+	log "currentOutput = $currentOutput"
+
+	#@ DANIEl ADDED FOR DEBUGGING
+	log $($currentOutput == *$output*)
+	#@                           
+
 	#check to make sure the output of ps from when the lock was written is equivalent to what we see now
-	if [[ $currentOutput == *$output* ]]; then
+	if [[ $currentOutput == *$output* ]]; then #~ this is running
 		log "process is still running, so the sandbox is still in use"
 		return 0
 	fi
@@ -254,10 +259,11 @@ function makeLockFile {
 #first argument is the sandbox (1 or 2) and second argument is the pair ID
 function trySandbox {
 
-	if (($1 == 1)); then
+
+	if (($1 == 1)); then #~ use sandbox "1" basically
 		LOCK_DIR="$SANDBOX_LOCK_DIR"
 		LOCK_USED="$SANDBOX_LOCK_USED"
-	else
+	else #~ using sandbox 2
 		LOCK_DIR="$SANDBOX2_LOCK_DIR"
 		LOCK_USED="$SANDBOX2_LOCK_USED"
 	fi
@@ -270,19 +276,24 @@ function trySandbox {
 
 		log "got the right to use the lock for sandbox $1"
 		#check to see if we can make the lock directory-- if so, we can run in sandbox
-		if mkdir "$LOCK_DIR" ; then
-			makeLockFile $1
+		if mkdir "$LOCK_DIR" ; then #~ error is starting here
+			makeLockFile $1 #~ this code is never running
 			return 0
 		fi
+		
 		#if we couldnt get the sandbox directory, there are 2 possibilites. Either it is occupied,
 		#or a previous job did not clean up the lock correctly. To check, we see if the pair given
 		#in the directory is still running
 
+		#~ reasons we might not be able to get the lock:
+		#~ 1. sandbox is occupied
+		#~ 2. previous job did not clean up
+
 		pairPID=$(ls "$LOCK_DIR")
 		log "found the pairID = $pairPID"
 
-
-		if ! isPairRunning $pairPID ; then
+		#~ calls functions isPairRunning
+		if ! isPairRunning $pairPID ; then 
 			#this means the sandbox is NOT actually in use, and that the old pair just did not clean up
 			log "found that the pair is not running in sandbox $1"
 			safeRmLock "$LOCK_DIR"
@@ -292,7 +303,7 @@ function trySandbox {
 				makeLockFile $1
 				return 0
 			fi
-		else
+		else #~ this part executes because isPairRunning is returning 0
 			log "found that pair $pairPID is running in sandbox $1"
 		fi
 		#could not get the sandbox
@@ -305,6 +316,7 @@ function trySandbox {
 		return 1
 	fi
 
+	#~ trySandbox should be returning 1
 }
 
 
@@ -317,6 +329,12 @@ function initSandbox {
 
 	# Second sandbox should only be available if there are 2 (or more) sockets.
 	numSockets="$(lscpu | grep -E "^ *Socket" | sed -e "s/^.* \([0-9][0-9]*\)/\1/")"
+
+	#@ DANIEl ADDED FOR DEBUGGING
+	log $($trySandbox 1)
+	log $(trySandbox 2)
+	log $numSockets
+	#@                           
 
 	if (trySandbox 1); then
 		SANDBOX=1
@@ -334,7 +352,7 @@ function initSandbox {
 		CORES="$core1_start-$core1_end"
 		WORKING_DIR=$WORKING_DIR_BASE'/sandbox2'
 
-	else #failed to get either sandbox
+	else #failed to get either sandbox #~ this code here is executing
 		log "unable to secure any sandbox for this job!"
 		sendNode "$HOSTNAME" "0"
 		sendStatus "$ERROR_RUNSCRIPT"
